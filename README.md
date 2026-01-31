@@ -142,6 +142,8 @@ elif [ "$ACTION" = "recover" ]; then
 fi
 ```
 
+**Important**: Hook scripts must use `#!/bin/sh` as the shebang. The container uses Alpine Linux which doesn't include bash. If your script requires bash-specific features, you'll need to modify the Dockerfile to install bash.
+
 Hook output is logged to `/logs/hooks.log`.
 
 ## Logs
