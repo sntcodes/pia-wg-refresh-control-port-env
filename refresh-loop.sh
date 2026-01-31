@@ -464,12 +464,19 @@ run_failure_hook() {
 
   failure_type="$1"
   log info "Running failure hook (type=$failure_type)"
+  log debug "Executing: $ON_FAILURE_SCRIPT"
+  log debug "Environment: FAILURE_TYPE=$failure_type"
 
   # Run script asynchronously with environment variables
   # Using eval to support script arguments
   (
     export FAILURE_TYPE="$failure_type"
+    log debug "Hook output will be in $LOG_DIR/hooks.log"
     eval "$ON_FAILURE_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
+    hook_exit=$?
+    if [ $hook_exit -ne 0 ]; then
+      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Hook exited with code $hook_exit" >> "$LOG_DIR/hooks.log"
+    fi
   ) &
 }
 
@@ -490,13 +497,20 @@ run_recovery_hook() {
   fi
 
   log info "Running recovery hook (server=$server_name, port=${forwarded_port:-none})"
+  log debug "Executing: $ON_RECOVERY_SCRIPT"
+  log debug "Environment: PIA_SERVER_NAME=$server_name, PIA_FORWARDED_PORT=${forwarded_port:-none}"
 
   # Run script asynchronously with environment variables
   # Using eval to support script arguments
   (
     export PIA_SERVER_NAME="$server_name"
     export PIA_FORWARDED_PORT="${forwarded_port:-}"
+    log debug "Hook output will be in $LOG_DIR/hooks.log"
     eval "$ON_RECOVERY_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
+    hook_exit=$?
+    if [ $hook_exit -ne 0 ]; then
+      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Hook exited with code $hook_exit" >> "$LOG_DIR/hooks.log"
+    fi
   ) &
 }
 
