@@ -419,27 +419,25 @@ restart_gluetun() {
       if [ -n "$dependent_containers" ]; then
         log info "Recreating dependent containers..."
 
-        # Stop all dependent containers first
-        for container in $dependent_containers; do
-          log debug "Stopping dependent container: $container"
-          if docker_output=$(docker stop "$container" 2>&1); then
-            echo "$docker_output" >> "$DOCKER_LOG"
-          else
-            echo "$docker_output" >> "$DOCKER_LOG"
-            log debug "Stop failed for $container: $docker_output"
-          fi
-        done
+        # Stop all dependent containers at once (much faster than one-by-one)
+        log debug "Stopping dependent containers: $dependent_containers"
+        if docker_output=$(docker stop $dependent_containers 2>&1); then
+          echo "$docker_output" >> "$DOCKER_LOG"
+          log debug "All dependent containers stopped"
+        else
+          echo "$docker_output" >> "$DOCKER_LOG"
+          log debug "Some containers failed to stop: $docker_output"
+        fi
 
-        # Remove all dependent containers
-        for container in $dependent_containers; do
-          log debug "Removing dependent container: $container"
-          if docker_output=$(docker rm "$container" 2>&1); then
-            echo "$docker_output" >> "$DOCKER_LOG"
-          else
-            echo "$docker_output" >> "$DOCKER_LOG"
-            log debug "Remove failed for $container: $docker_output"
-          fi
-        done
+        # Remove all dependent containers at once
+        log debug "Removing dependent containers: $dependent_containers"
+        if docker_output=$(docker rm $dependent_containers 2>&1); then
+          echo "$docker_output" >> "$DOCKER_LOG"
+          log debug "All dependent containers removed"
+        else
+          echo "$docker_output" >> "$DOCKER_LOG"
+          log debug "Some containers failed to remove: $docker_output"
+        fi
 
         # Recreate all dependent containers at once - compose handles dependency ordering
         log debug "Running: docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d $dependent_containers"
