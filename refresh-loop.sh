@@ -315,6 +315,26 @@ get_compose_project() {
   docker inspect "$GLUETUN_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true
 }
 
+# Get containers that depend on gluetun's network (network_mode: service:gluetun)
+# These containers need to be recreated when gluetun is recreated because they
+# share gluetun's network namespace and will lose connectivity when gluetun is removed.
+# Returns space-separated list of container names.
+get_dependent_containers() {
+  # Get gluetun's container ID (network_mode uses ID, not name)
+  gluetun_id=$(docker inspect --format='{{.Id}}' "$GLUETUN_CONTAINER" 2>/dev/null || true)
+  if [ -z "$gluetun_id" ]; then
+    return
+  fi
+
+  # Find all containers with NetworkMode = container:<gluetun_id>
+  docker ps -a --format '{{.Names}}' | while read container; do
+    network_mode=$(docker inspect --format='{{.HostConfig.NetworkMode}}' "$container" 2>/dev/null || true)
+    if [ "$network_mode" = "container:$gluetun_id" ]; then
+      echo "$container"
+    fi
+  done
+}
+
 # Perform docker restart with error handling and logging
 do_docker_restart() {
   if docker_output=$(docker restart "$GLUETUN_CONTAINER" 2>&1); then
@@ -352,6 +372,13 @@ restart_gluetun() {
     if [ -n "$project" ]; then
       log info "Recreating container $GLUETUN_CONTAINER (project: $project)..."
 
+      # Identify containers using gluetun's network BEFORE we remove gluetun
+      # These need to be recreated after gluetun comes back up
+      dependent_containers=$(get_dependent_containers | tr '\n' ' ')
+      if [ -n "$dependent_containers" ]; then
+        log info "Found dependent containers: $dependent_containers"
+      fi
+
       # Use raw docker commands to avoid docker compose dependency issues
       # (gluetun's depends_on pia-wg-refresh causes compose to recreate wrong container)
       log debug "Stopping container: $GLUETUN_CONTAINER"
@@ -383,8 +410,51 @@ restart_gluetun() {
       else
         echo "$docker_output" >> "$DOCKER_LOG"
         log debug "Compose output: $docker_output"
-        log info "Container recreation completed successfully"
+        log info "Gluetun container recreated successfully"
       fi
+
+      # Recreate dependent containers if any were found
+      # These containers use network_mode: service:gluetun and need to be recreated
+      # to reconnect to gluetun's new network namespace
+      if [ -n "$dependent_containers" ]; then
+        log info "Recreating dependent containers..."
+
+        # Stop all dependent containers first
+        for container in $dependent_containers; do
+          log debug "Stopping dependent container: $container"
+          if docker_output=$(docker stop "$container" 2>&1); then
+            echo "$docker_output" >> "$DOCKER_LOG"
+          else
+            echo "$docker_output" >> "$DOCKER_LOG"
+            log debug "Stop failed for $container: $docker_output"
+          fi
+        done
+
+        # Remove all dependent containers
+        for container in $dependent_containers; do
+          log debug "Removing dependent container: $container"
+          if docker_output=$(docker rm "$container" 2>&1); then
+            echo "$docker_output" >> "$DOCKER_LOG"
+          else
+            echo "$docker_output" >> "$DOCKER_LOG"
+            log debug "Remove failed for $container: $docker_output"
+          fi
+        done
+
+        # Recreate all dependent containers at once - compose handles dependency ordering
+        log debug "Running: docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d $dependent_containers"
+        if docker_output=$(docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d $dependent_containers 2>&1); then
+          echo "$docker_output" >> "$DOCKER_LOG"
+          log debug "Compose output: $docker_output"
+          log info "All dependent containers recreated successfully"
+        else
+          echo "$docker_output" >> "$DOCKER_LOG"
+          log error "Failed to recreate some dependent containers"
+          log debug "Compose output: $docker_output"
+        fi
+      fi
+
+      log info "Container recreation completed successfully"
     else
       log warn "Could not detect compose project name - container may not exist yet"
       log info "Attempting to start $GLUETUN_CONTAINER via compose..."
