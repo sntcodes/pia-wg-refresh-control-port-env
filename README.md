@@ -49,7 +49,7 @@ Optional:
 - `PIA_WG_CONFIG_URL` (optional: if set, download/replace `pia-wg-config` on startup)
 - `PIA_WG_CONFIG_SHA256` (optional: verify the download before installing)
 - `SELF_TEST` (optional: set to `1` to exit after startup checks)
-- 'GLUETUN_CONTROL_SERVER_PORT' (optional: to change port to look for control server)
+- `GLUETUN_CONTROL_SERVER_PORT` (optional: to change port to look for control server)
 
 ## Port forwarding
 
